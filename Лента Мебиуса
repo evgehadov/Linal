@@ -1,0 +1,162 @@
+import pygame
+import numpy as np
+import math
+from pygame.locals import *
+
+
+pygame.init()
+WIDTH, HEIGHT = 1000, 800
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Лента Мёбиуса")
+clock = pygame.time.Clock()
+
+
+a = 3.0
+b = 1.5
+u_samples = 60
+v_samples = 15
+
+
+BG_COLOR = (20, 20, 40)
+FILL_COLOR = (230, 200, 255)
+EDGE_COLOR = (150, 120, 200)
+
+
+camera_pos = np.array([0.0, 5.0, 10.0])
+view_dir = np.array([0.0, -0.5, -1.0])
+view_dir = view_dir / np.linalg.norm(view_dir)
+focal_length = 800
+
+
+light_dir = np.array([0.5, 0.5, -0.5])
+light_dir = light_dir / np.linalg.norm(light_dir)
+
+
+def mobius_surface(a, b, u, v):
+    x = (a + v * math.cos(u / 2)) * math.cos(u)
+    y = (a + v * math.cos(u / 2)) * math.sin(u)
+    z = b * v * math.sin(u / 2)
+    return np.array([x, y, z])
+
+
+def generate_mesh():
+    vertices = []
+    triangles = []
+
+    for i in range(u_samples):
+        u = 2 * math.pi * i / u_samples
+        for j in range(v_samples):
+            v = -0.5 + j / (v_samples - 1)
+            vertices.append(mobius_surface(a, b, u, v))
+
+    for i in range(u_samples):
+        for j in range(v_samples - 1):
+            i_next = (i + 1) % u_samples
+            v0 = i * v_samples + j
+            v1 = i * v_samples + j + 1
+            v2 = i_next * v_samples + j
+            v3 = i_next * v_samples + j + 1
+            triangles.append((v0, v1, v2))
+            triangles.append((v2, v1, v3))
+
+    return np.array(vertices), triangles
+
+
+def rotate_z(points, angle):
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    rotation_matrix = np.array([
+        [cos_a, -sin_a, 0],
+        [sin_a, cos_a, 0],
+        [0, 0, 1]
+    ])
+    return np.dot(points, rotation_matrix.T)
+
+
+def project(point):
+    vec = point - camera_pos
+
+    forward = view_dir
+    right = np.cross(np.array([0, 1, 0]), forward)
+    right = right / np.linalg.norm(right)
+    up = np.cross(forward, right)
+
+    x = np.dot(vec, right)
+    y = np.dot(vec, up)
+    z = np.dot(vec, forward)
+
+    if z == 0: z = 0.001
+    factor = focal_length / abs(z)
+
+    screen_x = WIDTH // 2 + x * factor
+    screen_y = HEIGHT // 2 - y * factor
+
+    return (screen_x, screen_y), abs(z)
+
+
+def calculate_normal(p1, p2, p3):
+    edge1 = p2 - p1
+    edge2 = p3 - p1
+    normal = np.cross(edge1, edge2)
+    norm = np.linalg.norm(normal)
+    return normal / norm if norm > 0 else np.array([0, 0, 1])
+
+
+vertices, triangles = generate_mesh()
+angle = 0
+rotation_speed = 0
+
+running = True
+while running:
+    for event in pygame.event.get():
+        if event.type == QUIT:
+            running = False
+        elif event.type == KEYDOWN:
+            if event.key == K_LEFT:
+                rotation_speed = 0.02
+            elif event.key == K_RIGHT:
+                rotation_speed = -0.02
+            elif event.key == K_ESCAPE:
+                running = False
+        elif event.type == KEYUP:
+            if event.key in (K_LEFT, K_RIGHT):
+                rotation_speed = 0
+
+    angle += rotation_speed
+
+    screen.fill(BG_COLOR)
+    rotated = rotate_z(vertices, angle)
+
+    render_list = []
+    for tri in triangles:
+        v0, v1, v2 = tri
+        p0, p1, p2 = rotated[v0], rotated[v1], rotated[v2]
+
+        normal = calculate_normal(p0, p1, p2)
+        (sp0, depth0), (sp1, depth1), (sp2, depth2) = project(p0), project(p1), project(p2)
+
+        points = [sp0, sp1, sp2]
+        min_x = min(p[0] for p in points)
+        max_x = max(p[0] for p in points)
+        min_y = min(p[1] for p in points)
+        max_y = max(p[1] for p in points)
+
+        if not (max_x < 0 or min_x > WIDTH or max_y < 0 or min_y > HEIGHT):
+            intensity = np.dot(normal, light_dir)
+            intensity = max(0.3, min(1.0, intensity))
+            color = tuple(int(c * intensity) for c in FILL_COLOR)
+            depth_avg = (depth0 + depth1 + depth2) / 3
+            render_list.append((depth_avg, sp0, sp1, sp2, color))
+
+
+    render_list.sort(reverse=True, key=lambda x: x[0])
+
+    for item in render_list:
+        depth, sp0, sp1, sp2, color = item
+        pygame.draw.polygon(screen, color, [sp0, sp1, sp2])
+        pygame.draw.polygon(screen, EDGE_COLOR, [sp0, sp1, sp2], 1)
+
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
