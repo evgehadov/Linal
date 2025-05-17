@@ -1,0 +1,86 @@
+import numpy as np
+
+
+class QuantumState:
+    def __init__(self, n_qubits):
+        self.n_qubits = n_qubits
+        self.n_states = 2 ** n_qubits 
+        self.state = np.ones(self.n_states, dtype=complex) / np.sqrt(self.n_states)
+
+    def get_state(self):
+        return self.state
+
+    def update_state(self, new_state):
+        if len(new_state) != self.n_states:
+            raise ValueError("New state dimension mismatch")
+        self.state = new_state
+
+    def probabilities(self):
+        return np.abs(self.state) ** 2
+
+
+class Oracle:
+
+    def __init__(self, n_qubits):
+        if n_qubits != 2:
+            raise ValueError("Oracle designed for 2 qubits only")
+        self.n_qubits = n_qubits
+        self.n_states = 2 ** n_qubits
+        self.matrix = np.eye(self.n_states, dtype=complex)
+        self.matrix[3, 3] = -1  
+
+    def apply(self, state_vector):
+        return np.dot(self.matrix, state_vector)
+
+
+class DiffusionOperator:
+
+    def __init__(self, initial_state):
+        self.n_states = len(initial_state)
+        psi = initial_state
+        psi_outer = np.outer(psi, psi.conj())
+        self.matrix = 2 * psi_outer - np.eye(self.n_states, dtype=complex)
+
+    def apply(self, state_vector):
+        return np.dot(self.matrix, state_vector)
+
+
+class GroverAlgorithm:
+
+    def __init__(self, n_qubits=2):
+        self.n_qubits = n_qubits
+        self.state = QuantumState(n_qubits)
+        self.oracle = Oracle(n_qubits)
+        self.diffusion = DiffusionOperator(self.state.get_state())
+
+    def run(self):
+        psi = self.state.get_state()
+        print("Initial state:", psi)
+
+        psi = self.oracle.apply(psi)
+        print("After oracle:", psi)
+
+        psi = self.diffusion.apply(psi)
+        print("After diffusion:", psi)
+
+        self.state.update_state(psi)
+
+        probs = self.state.probabilities()
+        print("Probabilities:", probs)
+        print(f"Probability of |11> (correct answer): {probs[3]:.4f}")
+
+        return psi, probs
+
+
+def main():
+    grover = GroverAlgorithm(n_qubits=2)
+    final_state, probabilities = grover.run()
+
+    if np.argmax(probabilities) == 3:
+        print("Success: |11> is the most likely state")
+    else:
+        print("Warning: |11> not maximized")
+
+
+if __name__ == "__main__":
+    main()
